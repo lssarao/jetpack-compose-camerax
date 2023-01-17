@@ -1,7 +1,9 @@
 package com.example.jetpackcomposecamerax
 
 import android.content.Context
+import android.content.Intent
 import android.net.Uri
+import android.os.Environment
 import android.util.Log
 import androidx.camera.core.CameraSelector
 import androidx.camera.core.ImageCapture
@@ -9,13 +11,12 @@ import androidx.camera.core.ImageCaptureException
 import androidx.camera.core.Preview
 import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.camera.view.PreviewView
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.material.Icon
-import androidx.compose.material.IconButton
-import androidx.compose.material.MaterialTheme
-import androidx.compose.material.Text
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.*
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.remember
@@ -29,6 +30,10 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.ContextCompat
+import androidx.core.net.toUri
+import coil.compose.AsyncImagePainter
+import coil.compose.rememberAsyncImagePainter
+import coil.request.ImageRequest
 import kotlinx.coroutines.suspendCancellableCoroutine
 import java.io.File
 import java.text.SimpleDateFormat
@@ -40,16 +45,16 @@ import kotlin.coroutines.resume
 private const val FILENAME = "dd-MM-yy-HH-mm-ss-SSS"
 private const val PHOTO_EXTENSION = ".jpg"
 
+
 @Composable
 fun CameraView(
-    outputDirectory: File,
     executor: Executor,
     onImageCaptured: (Uri) -> Unit,
     onError: (ImageCaptureException) -> Unit
 ) {
-    // current context
+    // Current context
     val context = LocalContext.current
-    // current lifecycle owner
+    // Current lifecycle owner
     val lifecycleOwner = LocalLifecycleOwner.current
     // Creating a new preview object using the default configuration
     val preview = Preview.Builder().build()
@@ -58,8 +63,9 @@ fun CameraView(
     val cameraSelector = CameraSelector.Builder()
         .requireLensFacing(lensFacing)
         .build()
-
+    // Implementing camerax's preview
     val previewView = remember { PreviewView(context) }
+    // take picture
     val imageCapture: ImageCapture = remember { ImageCapture.Builder().build() }
 
     LaunchedEffect(lensFacing) {
@@ -100,15 +106,13 @@ fun CameraView(
                 onClick = {
                     takePhoto(
                         imageCapture = imageCapture,
-                        outputDirectory = outputDirectory,
                         executor = executor,
                         onImageCaptured = onImageCaptured,
                         onError = onError
                     )
-                    Log.i("On Click", "Button Pressed")
+                    Log.i("CameraViewButton", "Button Pressed")
                 },
                 content = {
-
                     Icon(
                         painter = painterResource(id = R.drawable.ic_baseline_lens_24),
                         contentDescription = "Take picture",
@@ -124,16 +128,22 @@ fun CameraView(
 }
 
 fun takePhoto(
-    outputDirectory: File,
     imageCapture: ImageCapture,
     executor: Executor,
     onImageCaptured: (Uri) -> Unit,
     onError: (ImageCaptureException) -> Unit
 ) {
+    // Output directory to save captured image
+    val outputDirectory = File(
+        Environment.getExternalStoragePublicDirectory(
+            Environment.DIRECTORY_DCIM
+        ), "Camera"
+    )
+
     // Time stamped name and MediaStore entry
     val photoFile = File(
         outputDirectory,
-        SimpleDateFormat(
+        "CameraX-" + SimpleDateFormat(
             FILENAME,
             Locale.US
         ).format(System.currentTimeMillis()) + PHOTO_EXTENSION
@@ -145,14 +155,14 @@ fun takePhoto(
     imageCapture.takePicture(
         outputOptions, executor, object : ImageCapture.OnImageSavedCallback {
             override fun onError(exception: ImageCaptureException) {
-                Log.e("Take Picture", "Take photo error:", exception)
+                Log.e("TakePicture", "Take photo error:", exception)
                 onError(exception)
             }
 
             override fun onImageSaved(outputFileResults: ImageCapture.OutputFileResults) {
                 val savedUri = Uri.fromFile(photoFile)
                 onImageCaptured(savedUri)
-                Log.e("Take Picture", "Photo capture succeeded: $savedUri")
+                Log.e("TakePicture", "Photo capture succeeded: $savedUri")
             }
         }
     )
@@ -171,14 +181,107 @@ suspend fun Context.getCameraProvider(): ProcessCameraProvider {
     }
 }
 
-// Error ui composable function
+// Photo screen
+@Composable
+fun PhotoView(uri: Uri, afterPreview: () -> Unit) {
+    val ctx = LocalContext.current
+    Log.i("PhotoView", "URI Passing to painter: $uri")
+    val painter = rememberAsyncImagePainter(
+        model = ImageRequest.Builder(LocalContext.current)
+            .data(uri)
+            .build(),
+        onState = { state: AsyncImagePainter.State ->
+            Log.d("PreviewCheck", "PhotoView: $state")
+            if (state is AsyncImagePainter.State.Error) {
+                Log.d("PreviewCheck", "PhotoView: ${state.result.throwable}")
+            }
+        }
+    )
+
+    Column(
+        verticalArrangement = Arrangement.Top,
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
+        Spacer(modifier = Modifier.padding(20.dp))
+
+        Image(
+            painter = painter,
+            contentDescription = "Captured Image",
+            modifier = Modifier.padding(top = 10.dp, start = 10.dp, end = 10.dp)
+        )
+
+        OutlinedButton(
+            onClick = afterPreview,
+            colors = ButtonDefaults.buttonColors(Color.White),
+            shape = RoundedCornerShape(10.dp),
+            elevation = ButtonDefaults.elevation(
+                defaultElevation = 10.dp,
+                pressedElevation = 15.dp
+            )
+        ) {
+            Text(
+                text = "Take Photo",
+                color = Color.Blue
+            )
+        }
+        Log.i("PhotoViewButton", "Button Pressed")
+
+        // Changing uri parameter text
+        val changedURI = uri.toString().replace("file", "content").toUri()
+
+        OutlinedButton(
+            onClick = {
+                // Creating an intent with send action
+                val i = Intent(Intent.ACTION_SEND)
+
+                //passing uri
+                i.putExtra(Intent.EXTRA_STREAM, changedURI)
+                Log.i("Intent", "Passing URI:$changedURI ")
+                // setting type of intent
+                i.type = "image/jpeg"
+
+                //starting activity to open applications.
+                ctx.startActivity(i)
+            },
+            colors = ButtonDefaults.buttonColors(Color.White),
+            shape = RoundedCornerShape(10.dp),
+            elevation = ButtonDefaults.elevation(
+                defaultElevation = 10.dp,
+                pressedElevation = 15.dp
+            )
+        ) {
+            Text(
+                text = "Share Photo",
+                color = Color.Blue,
+            )
+        }
+    }
+}
+
+// Error screen
 @Composable
 fun ErrorView() {
-    Box(contentAlignment = Alignment.Center) {
-        Text(
-            text = "Something Went Wrong, Try Again!",
-            style = MaterialTheme.typography.body1,
-            textAlign = TextAlign.Center
+    Box(
+        modifier = Modifier.fillMaxSize(),
+    ) {
+        Column(
+            verticalArrangement = Arrangement.Top,
+            horizontalAlignment = Alignment.CenterHorizontally
         )
+        {
+            Spacer(modifier = Modifier.padding(20.dp))
+
+            Text(
+                text = "We need permission to access your device's storage for saving and previewing the image.",
+                style = MaterialTheme.typography.body1,
+                textAlign = TextAlign.Center
+            )
+
+            Spacer(modifier = Modifier.padding(20.dp))
+
+            LinearProgressIndicator(
+                color = Color.Blue
+            )
+        }
     }
 }
