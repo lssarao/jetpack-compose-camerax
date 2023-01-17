@@ -1,9 +1,12 @@
 package com.example.jetpackcomposecamerax
 
-import android.Manifest.permission.CAMERA
+import android.Manifest.permission.*
+import android.content.Intent
 import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Bundle
+import android.os.Environment
+import android.provider.Settings
 import android.util.Log
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -17,8 +20,8 @@ import androidx.compose.ui.Modifier
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
 import com.example.jetpackcomposecamerax.ui.theme.JetpackComposeCameraXTheme
-import java.io.File
 import java.util.concurrent.Executors
+
 
 class MainActivity : ComponentActivity() {
 
@@ -31,13 +34,14 @@ class MainActivity : ComponentActivity() {
     ) { isGranted ->
         if (isGranted) {
             Log.i("Permission", "Camera Permission granted")
+            // Camera ON
             shouldShowCamera.value = true
+            //
+            requestExternalStoragePermissions()
         } else {
             Log.i("Permission", "Camera Permission denied")
         }
     }
-
-    private lateinit var outputDirectory: File
 
     // Executor in which the takePicture callback methods will be run
     private val cameraExecutor = Executors.newSingleThreadExecutor()
@@ -51,21 +55,27 @@ class MainActivity : ComponentActivity() {
             JetpackComposeCameraXTheme {
                 Surface(
                     modifier = Modifier.fillMaxSize(),
-                    color = MaterialTheme.colors.primaryVariant
+                    color = MaterialTheme.colors.background
                 ) {
-                    if (shouldShowCamera.value) {
-                        CameraView(
-                            outputDirectory = outputDirectory,
-                            executor = cameraExecutor,
-                            onImageCaptured = {},
-                            onError = { Log.e("onError", "ImageCapture error:", it) }
-                        )
-                    } else {
-                        ErrorView()
+                    when {
+                        shouldShowCamera.value -> {
+                            CameraView(
+                                executor = cameraExecutor,
+                                onImageCaptured = { afterImageCapture(it) },
+                                onError = { Log.e("onError", "ImageCapture error:", it) }
+                            )
+                        }
+                        shouldShowPhoto.value -> {
+                            PhotoView(
+                                uri = photoUri,
+                                afterPreview = { restartCamera() })
+                        }
+                        else -> {
+                            ErrorView()
+                        }
                     }
                 }
                 requestCameraPermission()
-                outputDirectory = getOutputDirectory()
             }
         }
     }
@@ -75,7 +85,7 @@ class MainActivity : ComponentActivity() {
         when {
             ContextCompat.checkSelfPermission(
                 this,
-                CAMERA
+                    CAMERA
             ) == PackageManager.PERMISSION_GRANTED -> {
                 Log.i("Permission Check", "Camera permission previously granted")
                 shouldShowCamera.value = true
@@ -83,34 +93,50 @@ class MainActivity : ComponentActivity() {
 
             ActivityCompat.shouldShowRequestPermissionRationale(
                 this,
-                CAMERA
+                    CAMERA
             ) -> Log.i("Permission Check", "Show camera permissions dialog")
 
             else -> requestPermissionLauncher.launch(CAMERA)
         }
     }
 
-    // Creating a new folder in external storage if it’s not created already
-    private fun getOutputDirectory(): File {
-        val mediaDir = externalMediaDirs.firstOrNull()?.let {
-            File(it, PATH_NAME).apply { mkdirs() }
-        }
+    //
+    private fun requestExternalStoragePermissions() {
+        val intent = Intent()
+        intent.action = Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION
 
-        return if ((mediaDir != null) && mediaDir.exists()) {
-            Log.i("Folder", mediaDir.path); mediaDir
+        val uri = Uri.fromParts("package", this.packageName, null)
+
+        intent.data = uri
+
+        startActivity(intent)
+    }
+
+    // changing view from CameraView to PhotoView
+    private fun afterImageCapture(uri: Uri) {
+        // Camera OFF
+        shouldShowCamera.value = false
+        // passing uri
+        photoUri = uri
+        // External storage permissions check
+        if (Environment.isExternalStorageManager()) {
+            // Photo view ON
+            shouldShowPhoto.value = true
+            Log.i("Capturing URI", "Capturing URI: $uri")
         } else {
-            filesDir
+            requestExternalStoragePermissions()
+            Log.i("StoragePermissions", "Ask Storage Permissions")
         }
+    }
 
+    private fun restartCamera() {
+        // Camera ON
+        shouldShowCamera.value = true
     }
 
     // shutdown the cameraExecutor service which will stop all actively executing tasks
     override fun onDestroy() {
         super.onDestroy()
         cameraExecutor.shutdown()
-    }
-
-    companion object {
-        private const val PATH_NAME = "JC CameraX"
     }
 }

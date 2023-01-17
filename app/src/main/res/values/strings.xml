@@ -1,3 +1,10 @@
 <resources>
     <string name="app_name">Jetpack Compose CameraX</string>
+    <string name="allow_access" />
+    <string name="allow_access_detail" />
+    <string name="open_setting" />
+    <string name="not_now" />
+    <string name="external_storage_permission" />
+    <string name="external_storage_rationale_message" />
+    <string name="close" />
 </resources>
